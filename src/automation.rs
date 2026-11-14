@@ -110,7 +110,7 @@ impl Automation {
             .as_ref()
             .ok_or(SrPlotError::Unexcepted)?;
 
-        let (match_val, match_loc) =
+        let (match_val, match_loc, matched_template_size) =
             scale_and_match_template(screenshot, template, threshold, scale_range)?;
 
         log::debug!("目标图片：{}, 相似度：{:.2}", target_name, match_val);
@@ -121,15 +121,20 @@ impl Automation {
                 match_loc.x,
                 match_loc.y
             );
-            let (top_left, bottom_right) = self.calculate_positions(template, match_loc)?;
+            let (top_left, bottom_right) =
+                self.calculate_positions(matched_template_size, match_loc)?;
             Ok(Some((top_left, bottom_right)))
         } else {
             Ok(None)
         }
     }
 
-    fn calculate_positions(&self, template: &Mat, max_loc: Point) -> SrPlotResult<Coordinate> {
-        let Size { width, height } = template.size()?;
+    fn calculate_positions(
+        &self,
+        template_size: Size,
+        max_loc: Point,
+    ) -> SrPlotResult<Coordinate> {
+        let Size { width, height } = template_size;
 
         let scale_factor = self.screenshot_factor;
         let Region {
@@ -166,13 +171,17 @@ impl Automation {
         }
     }
 
+    pub fn click_at(&self, x: u32, y: u32) -> SrPlotResult<()> {
+        Input::move_mouse(x, y)?;
+        self.click()
+    }
+
     pub fn click_with_coordinate(&self, coordinate: Coordinate) -> SrPlotResult<()> {
         let ((left, top), (right, bottom)) = coordinate;
         let x = (left + right) / 2;
         let y = (top + bottom) / 2;
 
-        Input::move_mouse(x, y)?;
-        self.click()
+        self.click_at(x, y)
     }
 }
 
@@ -181,18 +190,17 @@ fn scale_and_match_template(
     template: &Mat,
     threshold: f64,
     scale_range: Option<(f64, f64)>,
-) -> SrPlotResult<(f64, Point)> {
+) -> SrPlotResult<(f64, Point, Size)> {
     log::debug!(
         "screenshot size: {:?}, template size: {:?}",
         screenshot.size(),
         template.size()
     );
 
-    let result = match_template(screenshot, template, TemplateMatchModes::TM_CCOEFF_NORMED)?;
-
-    let (max_val, max_loc) = match scale_range {
+    let (max_val, max_loc, matched_template_size) = match scale_range {
         Some((scale_start, scale_end)) => {
-            let (mut max_val, mut max_loc) = (0f64, Point::default());
+            let (mut max_val, mut max_loc, mut matched_template_size) =
+                (0f64, Point::default(), template.size()?);
             let mut scale_factor = scale_start;
             while scale_factor < scale_end + 0.0001 && max_val < threshold {
                 let scaled_template = resize_template(template, scale_factor)?;
@@ -206,15 +214,24 @@ fn scale_and_match_template(
                 if local_max_val > max_val {
                     max_val = local_max_val;
                     max_loc = local_max_loc;
+                    matched_template_size = scaled_template.size()?;
                 }
                 scale_factor += 0.05;
             }
-            (max_val, max_loc)
+            (max_val, max_loc, matched_template_size)
         }
-        None => find_max_location(&result)?,
+        None => {
+            let result = match_template(
+                screenshot,
+                template,
+                TemplateMatchModes::TM_CCOEFF_NORMED,
+            )?;
+            let (max_val, max_loc) = find_max_location(&result)?;
+            (max_val, max_loc, template.size()?)
+        }
     };
 
-    Ok((max_val, max_loc))
+    Ok((max_val, max_loc, matched_template_size))
 }
 
 fn resize_template(template: &Mat, scale_factor: f64) -> SrPlotResult<Mat> {

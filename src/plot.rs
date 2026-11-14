@@ -18,6 +18,45 @@ const SELECT_IMAGE_CROP: CropRatio = (
     400.0 / 1080.0,
 );
 
+// The dedicated confirm-button template is only used for 16:10 game windows.
+fn is_16_10_resolution(width: u32, height: u32) -> bool {
+    height > 0 && ((width as f64 / height as f64) - 1.6).abs() <= 0.005
+}
+
+fn confirm_template_scale_range(window_width: u32) -> (f64, f64) {
+    // Screenshots wider than 1920px are downscaled by 1920 / window_width.
+    let screenshot_scale = if window_width > 1920 {
+        1920.0 / window_width as f64
+    } else {
+        1.0
+    };
+    ((screenshot_scale - 0.05).max(0.05), screenshot_scale + 0.05)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{confirm_template_scale_range, is_16_10_resolution};
+
+    #[test]
+    fn detects_16_10_and_exact_reference_resolution() {
+        assert!(is_16_10_resolution(2560, 1600));
+        assert!(is_16_10_resolution(1920, 1200));
+        assert!(!is_16_10_resolution(1920, 1080));
+        assert!(!is_16_10_resolution(2560, 0));
+    }
+
+    #[test]
+    fn scales_confirmation_template_for_high_resolution_capture() {
+        let (start, end) = confirm_template_scale_range(2560);
+        assert!((start - 0.70).abs() < 1e-10);
+        assert!((end - 0.80).abs() < 1e-10);
+
+        let (start, end) = confirm_template_scale_range(1920);
+        assert!((start - 0.95).abs() < 1e-10);
+        assert!((end - 1.05).abs() < 1e-10);
+    }
+}
+
 pub struct Plot {
     select_img: ImageFile,
     game_title_name: String,
@@ -80,15 +119,46 @@ impl Plot {
         for img in &self.start_img {
             if self.auto.find_element(img, 0.9, scale_range)?.is_some() {
                 self.auto.take_screenshot(SELECT_IMAGE_CROP.into())?;
-                match self.auto.find_element(
+                let skip_button_found = match self.auto.find_element(
                     &self.select_img,
                     0.88, // 遇到过 0.89 匹配不上，所以降低 threshold
                     scale_range,
                 )? {
                     // 有选项就点击选项
-                    Some(coordinate) => self.auto.click_with_coordinate(coordinate)?,
-                    // 没选项就随便点
-                    None => self.auto.click()?,
+                    Some(coordinate) => {
+                        self.auto.click_with_coordinate(coordinate)?;
+                        true
+                    }
+                    // 没有识别到跳过按钮时，不进行兜底点击，避免误触。
+                    None => {
+                        log::debug!("未识别到跳过按钮，本轮不点击");
+                        false
+                    }
+                };
+
+                // 只在确实识别并点击跳过按钮后，继续点击 16:10 确认按钮。
+                if skip_button_found && is_16_10_resolution(window.width(), window.height()) {
+                    // 给确认弹窗留出动画时间。
+                    thread::sleep(Duration::from_millis(700));
+                    // 弹窗实际出现后再截取按钮区域，避免在弹窗未出现时点击固定坐标。
+                    self.auto.take_screenshot(None)?;
+                    let confirm_img = (
+                        "confirm.png",
+                        include_bytes!("../assets/confirm.png").to_vec(),
+                    );
+                    let confirm_scale_range = confirm_template_scale_range(window.width());
+                    match self
+                        .auto
+                        .find_element(&confirm_img, 0.88, Some(confirm_scale_range))?
+                    {
+                        Some(coordinate) => {
+                            log::info!("已识别确认按钮，将在按钮范围内点击");
+                            self.auto.click_with_coordinate(coordinate)?;
+                        }
+                        None => {
+                            log::warn!("未识别到确认按钮，跳过确认点击以避免误触");
+                        }
+                    }
                 }
                 break;
             }

@@ -40,11 +40,13 @@ pub fn take_screenshot(
         // 分辨率过高，调整图片大小到 1080p，加速计算
         if window_region.width > 1920 {
             screenshot_factor = 1920.0 / window_region.width as f64;
+            let resized_width = (screenshot.width() as f64 * screenshot_factor).round() as u32;
+            let resized_height = (screenshot.height() as f64 * screenshot_factor).round() as u32;
 
             screenshot = DynamicImage::ImageRgba8(screenshot)
-                .resize(
-                    (1920.0 * crop.map_or(1.0, |c| c.2)) as u32,
-                    (1080.0 * crop.map_or(1.0, |c| c.3)) as u32,
+                .resize_exact(
+                    resized_width,
+                    resized_height,
                     image::imageops::FilterType::Nearest,
                 )
                 .to_rgba8();
