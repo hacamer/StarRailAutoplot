@@ -28,6 +28,8 @@ is_elevated = "0.1.2"
 [package.metadata.vcpkg]
 git = "https://github.com/microsoft/vcpkg"
 rev = "94a50e8"
+# CI 用 overlay triplet 声明 VCPKG_ENV_PASSTHROUGH（见 vcpkg-triplets/）
+overlay-triplets-path = "vcpkg-triplets"
 
 [package.metadata.vcpkg.target]
 x86_64-pc-windows-msvc = { triplet = "x64-windows-static-release", dependencies = ["opencv4[contrib,nonfree]"] }
