@@ -84,10 +84,47 @@ jobs:
       # CMAKE_POLICY_VERSION_MINIMUM 是 CMake 官方环境变量，会初始化到缓存条目：
       # https://cmake.org/cmake/help/latest/variable/CMAKE_POLICY_VERSION_MINIMUM.html
       # 上游已由 https://github.com/microsoft/vcpkg/pull/44712 修复，钉扎 rev 升上去后可删本步。
+      # 失败时把真实报错提炼成 ::error annotations —— 匿名可读，方便远程定位
       - name: Build static opencv lib
-        run: cargo vcpkg -v build
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        run: |
+          Write-Host "cmake: $((cmake --version) | Select-Object -First 1)"
+          Write-Host "CMAKE_POLICY_VERSION_MINIMUM=$env:CMAKE_POLICY_VERSION_MINIMUM"
+          cargo vcpkg -v build 2>&1 | Tee-Object -FilePath vcpkg-build.log
+          $vc = $LASTEXITCODE
+          if ($vc -eq 0) { exit 0 }
+          Write-Host "::group::vcpkg-build.log (tail 150)"
+          Get-Content vcpkg-build.log -Tail 150 | ForEach-Object { Write-Host $_ }
+          Write-Host "::endgroup::"
+          $ib = "target/vcpkg/installed/vcpkg/issue_body.md"
+          if (Test-Path $ib) {
+            Write-Host "::group::vcpkg issue_body.md (tail 200)"
+            Get-Content $ib -Tail 200 | ForEach-Object { Write-Host $_ }
+            Write-Host "::endgroup::"
+          }
+          $pat = 'error:|CMake Error|FAILED:|error\[|BUILD_FAILED|ninja: build stopped'
+          $errLines = @()
+          if (Test-Path $ib) {
+            $errLines += Get-Content $ib | Select-String -Pattern $pat | ForEach-Object { $_.ToString().Trim() }
+          }
+          Get-ChildItem target/vcpkg/buildtrees -Recurse -Filter *-out.log -ErrorAction SilentlyContinue | ForEach-Object {
+            $dir = $_.Directory.Name
+            $errLines += Select-String -Path $_.FullName -Pattern $pat | ForEach-Object { "$dir :: " + $_.ToString().Trim() }
+          }
+          $errLines = @($errLines | Select-Object -Unique | Where-Object { $_ } | Select-Object -First 8)
+          if ($errLines.Count -eq 0) {
+            Write-Host "::error title=vcpkg::build failed (exit $vc) but no error line matched; see grouped log tail"
+          } else {
+            $i = 0
+            foreach ($line in $errLines) {
+              $i++
+              $msg = ($line -replace '\r?\n', ' ')
+              if ($msg.Length -gt 1500) { $msg = $msg.Substring(0, 1500) + '...' }
+              Write-Host "::error title=vcpkg error $i/$($errLines.Count)::${msg}"
+            }
+          }
+          exit $vc
 
       # # Install opencv
       # - name: Install opencv
