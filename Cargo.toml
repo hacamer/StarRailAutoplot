@@ -27,9 +27,11 @@ is_elevated = "0.1.2"
 # 静态编译方法：https://github.com/twistedfall/opencv-rust/issues/581#issuecomment-2167130325
 [package.metadata.vcpkg]
 git = "https://github.com/microsoft/vcpkg"
-rev = "94a50e8"
-# CI 用 overlay triplet 声明 VCPKG_ENV_PASSTHROUGH（见 vcpkg-triplets/）
-overlay-triplets-path = "vcpkg-triplets"
+# 2026-11 从 94a50e8 升级：旧 rev 钉扎的 msys2 下载 URL 有 51/78 已被上游清档 404
+# （无公共存档、SHA512 校验禁止换字节），且其 ports 早于 CMake 4（bzip2 直接 BUILD_FAILED）。
+# 新 rev 自带官方修复：ports.cmake 注入 CMAKE_POLICY_VERSION_MINIMUM=3.5、msys2 URL 全部存活、
+# opencv4 升至 4.14.0（crate 0.93 的版本门 "~4" 放行）。
+rev = "91f0baffae4e06a68a961d7f6493e8a1ca6775eb"
 
 [package.metadata.vcpkg.target]
 x86_64-pc-windows-msvc = { triplet = "x64-windows-static-release", dependencies = ["opencv4[contrib,nonfree]"] }

@@ -78,28 +78,15 @@ jobs:
       - name: Install cargo-vcpkg
         run: cargo install cargo-vcpkg
 
-      # Cargo.toml 钉扎的 vcpkg (94a50e8, 2024-06) 端口脚本早于 CMake 4：
-      # bzip2 的 cmake_minimum_required(VERSION 3.0) 在 CMake 4.x 直接报错 (BUILD_FAILED)。
-      # 第一轮只设 CMAKE_POLICY_VERSION_MINIMUM 失败 —— vcpkg 清洗子进程环境，变量没透传进去。
-      # 现在双保险：
-      #   1) PATH 前置 CMake 3.31（该 vcpkg 版本无 CMAKE acquire 逻辑，全靠 PATH 找 cmake）
-      #   2) vcpkg-triplets/ 里声明 VCPKG_ENV_PASSTHROUGH 透传环境变量
-      # 钉扎 rev 升到含 https://github.com/microsoft/vcpkg/pull/44712 之后可整步删掉。
+      # 2026-11: Cargo.toml 的 vcpkg rev 已升至 91f0baff —— 官方已含 CMake 4 兜底
+      # (ports.cmake 注入 CMAKE_POLICY_VERSION_MINIMUM=3.5) 且其 msys2 下载 URL 全部存活
+      # （旧 rev 94a50e8 钉扎的 URL 有 51/78 被上游清档 404，补不完，故整体升级）。
+      # 之前为此加的 CMake 3.31 下载与 overlay triplet 透传随之移除。
       # 失败时把真实报错提炼成 ::error annotations —— 匿名可读，方便远程定位
       - name: Build static opencv lib
-        env:
-          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: |
-          $cmDir = Join-Path $env:RUNNER_TEMP "cmake-3.31.0-windows-x86_64"
-          if (-not (Test-Path "$cmDir\bin\cmake.exe")) {
-            $zip = Join-Path $env:RUNNER_TEMP "cmake-3.31.0.zip"
-            Invoke-WebRequest -Uri "https://github.com/Kitware/CMake/releases/download/v3.31.0/cmake-3.31.0-windows-x86_64.zip" -OutFile $zip
-            Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP -Force
-          }
-          $env:Path = "$cmDir\bin;" + $env:Path
           $cmVer = (cmake --version | Select-Object -First 1)
           Write-Host "cmake: $cmVer"
-          Write-Host "CMAKE_POLICY_VERSION_MINIMUM=$env:CMAKE_POLICY_VERSION_MINIMUM"
           cargo vcpkg -v build 2>&1 | Tee-Object -FilePath vcpkg-build.log
           $vc = $LASTEXITCODE
           if ($vc -eq 0) { exit 0 }
